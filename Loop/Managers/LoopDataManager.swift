@@ -31,6 +31,8 @@ final class LoopDataManager {
 
     weak var delegate: LoopDataManagerDelegate?
 
+    private let standardCorrectionEffectDuration = TimeInterval.minutes(60.0)
+
     private let logger: CategoryLogger
 
     // References to registered notification center observers
@@ -41,6 +43,9 @@ final class LoopDataManager {
             NotificationCenter.default.removeObserver(observer)
         }
     }
+
+    // Make overall retrospective effect available for display to the user
+    var totalRetrospectiveCorrection: HKQuantity?
 
     init(
         lastLoopCompleted: Date?,
@@ -71,6 +76,8 @@ final class LoopDataManager {
             insulinSensitivitySchedule: insulinSensitivitySchedule,
             overrideHistory: overrideHistory
         )
+
+        totalRetrospectiveCorrection = nil
 
         doseStore = DoseStore(
             healthStore: healthStore,
@@ -238,7 +245,7 @@ final class LoopDataManager {
     private let lockedBasalDeliveryState: Locked<PumpManagerStatus.BasalDeliveryState?>
 
     fileprivate var lastRequestedBolus: DoseEntry?
-    
+
     private var lastLoopStarted: Date?
 
     /// The last date at which a loop completed, from prediction to dose (if dosing is enabled)
@@ -288,7 +295,7 @@ final class LoopDataManager {
             backgroundTask = .invalid
         }
     }
-    
+
     private func loopDidComplete(date: Date, duration: TimeInterval) {
         lastLoopCompleted = date
         NotificationManager.clearLoopNotRunningNotifications()
@@ -450,7 +457,7 @@ extension LoopDataManager {
             HKObjectType.categoryType(forIdentifier: HKCategoryTypeIdentifier.sleepAnalysis)!
         ].compactMap { $0 })
     }
-    
+
     /// All the HealthKit types to be shared by stores
     private var shareTypes: Set<HKSampleType> {
         return Set([
@@ -463,7 +470,7 @@ extension LoopDataManager {
     var sleepDataAuthorizationRequired: Bool {
         return carbStore.healthStore.authorizationStatus(for: HKObjectType.categoryType(forIdentifier: HKCategoryTypeIdentifier.sleepAnalysis)!) == .notDetermined
     }
-    
+
     var sleepDataSharingDenied: Bool {
         return carbStore.healthStore.authorizationStatus(for: HKObjectType.categoryType(forIdentifier: HKCategoryTypeIdentifier.sleepAnalysis)!) == .sharingDenied
     }
@@ -1097,17 +1104,21 @@ extension LoopDataManager {
         guard let carbEffects = self.carbEffect else {
             retrospectiveGlucoseDiscrepancies = nil
             retrospectiveGlucoseEffect = []
+            totalRetrospectiveCorrection = nil
             throw LoopError.missingDataError(.carbEffect)
         }
 
         // Get most recent glucose, otherwise clear effect and throw error
         guard let glucose = self.glucoseStore.latestGlucose else {
             retrospectiveGlucoseEffect = []
+            totalRetrospectiveCorrection = nil
             throw LoopError.missingDataError(.glucose)
         }
 
         // Get timeline of glucose discrepancies
         retrospectiveGlucoseDiscrepancies = insulinCounteractionEffects.subtracting(carbEffects, withUniformInterval: carbStore.delta)
+
+        retrospectiveCorrection = settings.enabledRetrospectiveCorrectionAlgorithm
 
         // Calculate retrospective correction
         retrospectiveGlucoseEffect = retrospectiveCorrection.computeEffect(
@@ -1153,7 +1164,7 @@ extension LoopDataManager {
         }
 
         let pumpStatusDate = doseStore.lastAddedPumpData
-        
+
         let startDate = Date()
 
         guard startDate.timeIntervalSince(glucose.startDate) <= settings.inputDataRecencyInterval else {
@@ -1196,7 +1207,7 @@ extension LoopDataManager {
         else {
             throw LoopError.configurationError(.generalSettings)
         }
-        
+
         guard lastRequestedBolus == nil
         else {
             // Don't recommend changes if a bolus was just requested.
@@ -1209,7 +1220,7 @@ extension LoopDataManager {
         let rateRounder = { (_ rate: Double) in
             return self.delegate?.loopDataManager(self, roundBasalRate: rate) ?? rate
         }
-        
+
 
         let lastTempBasal: DoseEntry?
 
@@ -1218,15 +1229,15 @@ extension LoopDataManager {
         } else {
             lastTempBasal = nil
         }
-        
+
         let dosingRecommendation: AutomaticDoseRecommendation?
-        
+
         switch settings.dosingStrategy {
         case .automaticBolus:
             let volumeRounder = { (_ units: Double) in
                 return self.delegate?.loopDataManager(self, roundBolusVolume: units) ?? units
             }
-            
+
             dosingRecommendation = predictedGlucose.recommendedAutomaticDose(
                 to: glucoseTargetRange,
                 at: predictedGlucose[0].startDate,
@@ -1256,7 +1267,7 @@ extension LoopDataManager {
             )
             dosingRecommendation = AutomaticDoseRecommendation(basalAdjustment: temp, bolusUnits: 0)
         }
-        
+
         if let dosingRecommendation = dosingRecommendation {
             self.logger.default("Current basal state: \(String(describing: basalDeliveryState))")
             self.logger.default("Recommending dose: \(dosingRecommendation) at \(startDate)")
@@ -1296,7 +1307,7 @@ extension LoopDataManager {
             completion(LoopError.recommendationExpired(date: recommendedDose.date))
             return
         }
-        
+
         if case .suspended = basalDeliveryState {
             completion(LoopError.pumpSuspended)
             return
@@ -1309,7 +1320,6 @@ extension LoopDataManager {
         }
     }
 }
-
 
 /// Describes a view into the loop state
 protocol LoopState {
@@ -1422,7 +1432,7 @@ extension LoopDataManager {
             }
             return loopDataManager.recommendedDose
         }
-        
+
         var recommendedBolus: (recommendation: ManualBolusRecommendation, date: Date)? {
             dispatchPrecondition(condition: .onQueue(loopDataManager.dataAccessQueue))
             guard loopDataManager.lastRequestedBolus == nil else {
@@ -1534,6 +1544,7 @@ extension LoopDataManager {
                 "]",
 
                 "glucoseMomentumEffect: \(manager.glucoseMomentumEffect ?? [])",
+                "",
                 "retrospectiveGlucoseEffect: \(manager.retrospectiveGlucoseEffect)",
                 "recommendedTempBasal: \(String(describing: state.recommendedAutomaticDose))",
                 "recommendedBolus: \(String(describing: state.recommendedBolus))",
