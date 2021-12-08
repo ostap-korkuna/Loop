@@ -20,10 +20,12 @@ class NightscoutService: ServiceAuthenticationUI {
 
     let title: String = NSLocalizedString("Nightscout", comment: "The title of the Nightscout service")
 
-    init(siteURL: URL?, APISecret: String?) {
+    init(siteURL: URL?, APISecret: String?, siteURLSecondary: URL?, APISecretSecondary: String?) {
         credentialValues = [
             siteURL?.absoluteString,
             APISecret,
+            siteURLSecondary?.absoluteString,
+            APISecretSecondary
         ]
 
         credentialFormFields = [
@@ -35,6 +37,18 @@ class NightscoutService: ServiceAuthenticationUI {
             ),
             ServiceCredential(
                 title: NSLocalizedString("API Secret", comment: "The title of the nightscout API secret credential"),
+                placeholder: nil,
+                isSecret: true,
+                keyboardType: .asciiCapable
+            ),
+            ServiceCredential(
+                title: NSLocalizedString("Site URL 2", comment: "The title of the nightscout site URL credential"),
+                placeholder: NSLocalizedString("https://mysite.herokuapp.com", comment: "The placeholder text for the nightscout site URL credential"),
+                isSecret: false,
+                keyboardType: .URL
+            ),
+            ServiceCredential(
+                title: NSLocalizedString("API Secret 2", comment: "The title of the nightscout API secret credential"),
                 placeholder: nil,
                 isSecret: true,
                 keyboardType: .asciiCapable
@@ -66,6 +80,18 @@ class NightscoutService: ServiceAuthenticationUI {
         return credentialValues[1]
     }
 
+    var siteURLSecondary: URL? {
+        if let URLString = credentialValues[2], !URLString.isEmpty {
+            return URL(string: URLString)
+        }
+
+        return nil
+    }
+
+    var APISecretSecondary: String? {
+        return credentialValues[3]
+    }
+
     var isAuthorized: Bool = true
 
     func verify(_ completion: @escaping (_ success: Bool, _ error: Error?) -> Void) {
@@ -75,7 +101,7 @@ class NightscoutService: ServiceAuthenticationUI {
             return
         }
 
-        let uploader = NightscoutUploader(siteURL: siteURL, APISecret: APISecret)
+        let uploader = NightscoutUploader(siteURL: siteURL, APISecret: APISecret, siteURLSecondary: siteURLSecondary, APISecretSecondary: APISecretSecondary)
         uploader.checkAuth { (error) in
             completion(true, error)
         }

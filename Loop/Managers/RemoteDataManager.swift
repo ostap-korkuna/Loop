@@ -18,6 +18,7 @@ final class RemoteDataManager {
     var nightscoutService: NightscoutService {
         didSet {
             keychain.setNightscoutURL(nightscoutService.siteURL, secret: nightscoutService.APISecret)
+            keychain.setNightscoutURLSecondary(nightscoutService.siteURLSecondary, secret: nightscoutService.APISecretSecondary)
             UIDevice.current.isBatteryMonitoringEnabled = true
             delegate?.remoteDataManagerDidUpdateServices(self)
         }
@@ -27,10 +28,14 @@ final class RemoteDataManager {
 
     init() {
         if let (siteURL, APISecret) = keychain.getNightscoutCredentials() {
-            nightscoutService = NightscoutService(siteURL: siteURL, APISecret: APISecret)
+            if let (siteURLSecondary, APISecretSecondary) = keychain.getNightscoutCredentialsSecondary() {
+                nightscoutService = NightscoutService(siteURL: siteURL, APISecret: APISecret, siteURLSecondary: siteURLSecondary, APISecretSecondary: APISecretSecondary)
+            } else {
+                nightscoutService = NightscoutService(siteURL: siteURL, APISecret: APISecret, siteURLSecondary: nil, APISecretSecondary: nil)
+            }
             UIDevice.current.isBatteryMonitoringEnabled = true
         } else {
-            nightscoutService = NightscoutService(siteURL: nil, APISecret: nil)
+            nightscoutService = NightscoutService(siteURL: nil, APISecret: nil, siteURLSecondary: nil, APISecretSecondary: nil)
         }
     }
 }
